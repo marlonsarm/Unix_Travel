@@ -12,6 +12,7 @@ class ViajeCard extends StatelessWidget {
   final String imagen;
   final bool esInvitado;
   final String cedula;
+  final String tipo;
 
   const ViajeCard({
     super.key,
@@ -20,9 +21,142 @@ class ViajeCard extends StatelessWidget {
     required this.imagen,
     required this.esInvitado,
     required this.cedula,
+    this.tipo = "destino",
   });
 
-  Future<void> agregarCarrito(BuildContext context) async {
+  // 🛒 AGREGAR AL CARRITO CON FECHAS
+  Future<void> mostrarDialogoFechas(BuildContext context) async {
+    DateTime? fechaIda;
+    DateTime? fechaVuelta;
+    int personas = 1;
+
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            return AlertDialog(
+              title: Text("Reservar $nombre ✈️"),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+
+                  // 📅 FECHA IDA
+                  ListTile(
+                    leading: const Icon(Icons.flight_takeoff, color: Color(0xFF2C5364)),
+                    title: Text(
+                      fechaIda == null
+                          ? "Seleccionar fecha de ida"
+                          : "Ida: ${fechaIda!.day}/${fechaIda!.month}/${fechaIda!.year}",
+                    ),
+                    onTap: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: DateTime.now(),
+                        firstDate: DateTime.now(),
+                        lastDate: DateTime(2030),
+                      );
+                      if (picked != null) {
+                        setStateDialog(() => fechaIda = picked);
+                      }
+                    },
+                  ),
+
+                  // 📅 FECHA VUELTA
+                  ListTile(
+                    leading: const Icon(Icons.flight_land, color: Color(0xFF2C5364)),
+                    title: Text(
+                      fechaVuelta == null
+                          ? "Seleccionar fecha de vuelta"
+                          : "Vuelta: ${fechaVuelta!.day}/${fechaVuelta!.month}/${fechaVuelta!.year}",
+                    ),
+                    onTap: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: DateTime.now(),
+                        firstDate: DateTime.now(),
+                        lastDate: DateTime(2030),
+                      );
+                      if (picked != null) {
+                        setStateDialog(() => fechaVuelta = picked);
+                      }
+                    },
+                  ),
+
+                  const SizedBox(height: 10),
+
+                  // 👥 PERSONAS
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text("Personas:", style: TextStyle(fontSize: 16)),
+                      Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.remove_circle_outline),
+                            onPressed: () {
+                              if (personas > 1) {
+                                setStateDialog(() => personas--);
+                              }
+                            },
+                          ),
+                          Text(
+                            "$personas",
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.add_circle_outline),
+                            onPressed: () {
+                              setStateDialog(() => personas++);
+                            },
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("Cancelar"),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2C5364),
+                  ),
+                  onPressed: () async {
+                    if (fechaIda == null || fechaVuelta == null) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text("Selecciona las fechas ⚠️")),
+                      );
+                      return;
+                    }
+
+                    if (fechaVuelta!.isBefore(fechaIda!)) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text("La fecha de vuelta no puede ser antes de la ida ⚠️")),
+                      );
+                      return;
+                    }
+
+                    Navigator.pop(context);
+                    await agregarCarrito(context, fechaIda!, fechaVuelta!, personas);
+                  },
+                  child: const Text("Agregar al carrito"),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> agregarCarrito(BuildContext context, DateTime fechaIda, DateTime fechaVuelta, int personas) async {
     try {
       final response = await http.post(
         Uri.parse("$baseUrl/agregar_carrito"),
@@ -31,7 +165,11 @@ class ViajeCard extends StatelessWidget {
           "usuario_cedula": cedula,
           "nombre": nombre,
           "precio": precio,
-          "imagen": imagen
+          "imagen": imagen,
+          "fecha_ida": "${fechaIda.year}-${fechaIda.month.toString().padLeft(2, '0')}-${fechaIda.day.toString().padLeft(2, '0')}",
+          "fecha_vuelta": "${fechaVuelta.year}-${fechaVuelta.month.toString().padLeft(2, '0')}-${fechaVuelta.day.toString().padLeft(2, '0')}",
+          "personas": personas,
+          "tipo": tipo,
         }),
       );
 
@@ -51,25 +189,28 @@ class ViajeCard extends StatelessWidget {
     }
   }
 
-  Future<void> agregarFavorito(BuildContext context) async {
+  // ❤️ FAVORITO
+  Future<void> toggleFavorito(BuildContext context) async {
     try {
       final response = await http.post(
-        Uri.parse("$baseUrl/agregar_favorito"),
+        Uri.parse("$baseUrl/toggle_favorito"),
         headers: {"Content-Type": "application/json"},
         body: jsonEncode({
           "usuario_cedula": cedula,
           "nombre": nombre,
           "precio": precio,
-          "imagen": imagen
+          "imagen": imagen,
         }),
       );
+
+      final data = jsonDecode(response.body);
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            response.statusCode == 200
+            data["estado"] == "agregado"
                 ? "Agregado a favoritos ❤️"
-                : "Error al agregar ❌",
+                : "Eliminado de favoritos 💔",
           ),
         ),
       );
@@ -77,6 +218,34 @@ class ViajeCard extends StatelessWidget {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Error conexión API ❌")),
       );
+    }
+  }
+
+  // 🏷️ COLOR DEL BADGE SEGÚN TIPO
+  Color _colorBadge() {
+    switch (tipo) {
+      case "hotel":
+        return Colors.purple;
+      case "vuelo":
+        return Colors.blue;
+      case "tour":
+        return Colors.orange;
+      default:
+        return Colors.green;
+    }
+  }
+
+  // 🏷️ TEXTO DEL BADGE SEGÚN TIPO
+  String _textoBadge() {
+    switch (tipo) {
+      case "hotel":
+        return "HOTEL";
+      case "vuelo":
+        return "VUELO";
+      case "tour":
+        return "TOUR";
+      default:
+        return "TOP";
     }
   }
 
@@ -97,7 +266,7 @@ class ViajeCard extends StatelessWidget {
         );
       },
       child: Card(
-        elevation: 8, // 🔥 más profundidad
+        elevation: 8,
         shadowColor: Colors.black26,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(18),
@@ -109,7 +278,7 @@ class ViajeCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
 
-              // 🔥 IMAGEN CON OVERLAY PRO
+              // 🔥 IMAGEN CON OVERLAY
               ClipRRect(
                 borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
                 child: Stack(
@@ -119,9 +288,14 @@ class ViajeCard extends StatelessWidget {
                       height: 120,
                       width: double.infinity,
                       fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Container(
+                        height: 120,
+                        color: Colors.grey[300],
+                        child: const Icon(Icons.image_not_supported, size: 40),
+                      ),
                     ),
 
-                    // 🔥 DEGRADADO OSCURO
+                    // 🔥 DEGRADADO
                     Container(
                       height: 120,
                       decoration: BoxDecoration(
@@ -136,7 +310,7 @@ class ViajeCard extends StatelessWidget {
                       ),
                     ),
 
-                    // ❤️ FAVORITO PRO
+                    // ❤️ FAVORITO
                     Positioned(
                       top: 8,
                       right: 8,
@@ -156,33 +330,33 @@ class ViajeCard extends StatelessWidget {
                                 ),
                               );
                             } else {
-                              agregarFavorito(context);
+                              toggleFavorito(context);
                             }
                           },
                         ),
                       ),
                     ),
 
-                    // 🔥 BADGE TOP MEJORADO
+                    // 🏷️ BADGE DINÁMICO POR TIPO
                     Positioned(
                       top: 10,
                       left: 10,
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
-                          color: Colors.green,
+                          color: _colorBadge(),
                           borderRadius: BorderRadius.circular(20),
                         ),
-                        child: const Text(
-                          "TOP",
-                          style: TextStyle(
+                        child: Text(
+                          _textoBadge(),
+                          style: const TextStyle(
                             color: Colors.white,
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
                       ),
-                    )
+                    ),
                   ],
                 ),
               ),
@@ -194,7 +368,6 @@ class ViajeCard extends StatelessWidget {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -218,7 +391,6 @@ class ViajeCard extends StatelessWidget {
                           ),
                         ],
                       ),
-
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton(
@@ -238,7 +410,7 @@ class ViajeCard extends StatelessWidget {
                                 ),
                               );
                             } else {
-                              agregarCarrito(context);
+                              mostrarDialogoFechas(context);
                             }
                           },
                           child: const Text(
